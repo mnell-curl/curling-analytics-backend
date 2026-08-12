@@ -39,6 +39,23 @@ const db = new sqlite3.Database("./curling.db");
 app.use(cors());
 app.use(express.json());
 
+// --- GET /events ---
+app.get("/events", (req, res) => {
+  db.all(`SELECT * FROM events ORDER BY event_id DESC`, [], (err, rows) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+
+    const events = rows.map((row) => ({
+      eventId: row.event_id,
+      eventName: row.event_name,
+      season: row.season,
+    }));
+
+    res.status(200).json(events);
+  });
+});
+
 // --- GET /teams/card ---
 app.get("/teams/card", (req, res) => {
   const id = req.query.id;
@@ -137,14 +154,23 @@ app.get("/standings", (req, res) => {
 // --- GET /games ---
 app.get("/games", (req, res) => {
   const teamId = req.query.team_id;
+  const eventId = req.query.event_id;
 
   if (!teamId) {
     return res.status(400).json({ error: "Undefined parameters" });
   }
 
+  const conditions = ["(team1_id = ? OR team2_id = ?)"];
+  const params = [teamId, teamId];
+
+  if (eventId) {
+    conditions.push("event_id = ?");
+    params.push(eventId);
+  }
+
   db.all(
-    `SELECT * FROM games WHERE team1_id = ? OR team2_id = ? ORDER BY draw_number ASC`,
-    [teamId, teamId],
+    `SELECT * FROM games WHERE ${conditions.join(" AND ")} ORDER BY draw_number ASC`,
+    params,
     (err, rows) => {
       if (err) {
         return res.status(500).json({ error: err.message });
@@ -152,6 +178,7 @@ app.get("/games", (req, res) => {
 
       const games = rows.map((row) => ({
         gameId: row.game_id,
+        eventId: row.event_id,
         eventName: row.event_name,
         drawNumber: row.draw_number,
         date: row.date,

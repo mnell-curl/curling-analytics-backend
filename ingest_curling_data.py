@@ -22,6 +22,12 @@ DB_PATH = "curling.db"
 def create_tables(conn):
     conn.executescript(
         """
+        CREATE TABLE IF NOT EXISTS events (
+            event_id INTEGER PRIMARY KEY,
+            event_name TEXT,
+            season TEXT
+        );
+
         CREATE TABLE IF NOT EXISTS teams (
             team_id INTEGER PRIMARY KEY,
             skip_name TEXT NOT NULL,
@@ -31,6 +37,7 @@ def create_tables(conn):
 
         CREATE TABLE IF NOT EXISTS games (
             game_id TEXT PRIMARY KEY,
+            event_id INTEGER REFERENCES events(event_id),
             event_name TEXT,
             draw_number INTEGER,
             date TEXT,
@@ -52,6 +59,15 @@ def create_tables(conn):
         """
     )
     conn.commit()
+
+    # games.event_id doesn't exist for databases created before this update —
+    # add it if missing rather than forcing everyone to delete curling.db.
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(games)")
+    existing_columns = {row[1] for row in cur.fetchall()}
+    if "event_id" not in existing_columns:
+        cur.execute("ALTER TABLE games ADD COLUMN event_id INTEGER")
+        conn.commit()
 
 
 def extract_team_id(href: str) -> int:
@@ -94,6 +110,17 @@ def ingest_event(cz_event_id: int, season: str):
     create_tables(conn)
     cur = conn.cursor()
 
+    cur.execute(
+        """
+        INSERT INTO events (event_id, event_name, season)
+        VALUES (?, ?, ?)
+        ON CONFLICT(event_id) DO UPDATE SET
+            event_name = excluded.event_name,
+            season = excluded.season
+        """,
+        (cz_event_id, event_name, season),
+    )
+
     games_inserted = 0
     ends_inserted = 0
 
@@ -123,14 +150,15 @@ def ingest_event(cz_event_id: int, season: str):
         cur.execute(
             """
             INSERT INTO games (
-                game_id, event_name, draw_number, date,
+                game_id, event_id, event_name, draw_number, date,
                 team1_id, team2_id, team1_score, team2_score, team1_hammer_start
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(game_id) DO NOTHING
             """,
             (
                 game_id,
+                cz_event_id,
                 event_name,
                 team1.draw_num,
                 None,  # per-draw date not fetched; add back a LinescorePage lookup per draw if you need this
