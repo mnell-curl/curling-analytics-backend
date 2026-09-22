@@ -56,6 +56,85 @@ app.get("/events", (req, res) => {
   });
 });
 
+// --- GET /teams/roster ---
+app.get("/teams/roster", (req, res) => {
+  const teamId = req.query.id;
+
+  if (!teamId) {
+    return res.status(400).json({ error: "Undefined parameters" });
+  }
+
+  db.all(
+    `SELECT r.player_id, r.label, p.name, p.age, p.born, p.resides, p.throws, p.profession
+     FROM rosters r
+     LEFT JOIN players p ON p.player_id = r.player_id
+     WHERE r.team_id = ?`,
+    [teamId],
+    (err, rows) => {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      if (rows.length === 0) {
+        return res.status(404).json({ error: "No roster found for that team_id" });
+      }
+
+      const roster = rows.map((row) => ({
+        playerId: row.player_id,
+        label: row.label,
+        name: row.name,
+        age: row.age,
+        born: row.born,
+        resides: row.resides,
+        throws: row.throws,
+        profession: row.profession,
+      }));
+
+      res.status(200).json(roster);
+    }
+  );
+});
+
+// --- GET /players/:player_id ---
+app.get("/players/:player_id", (req, res) => {
+  const playerId = req.params.player_id;
+
+  db.get(`SELECT * FROM players WHERE player_id = ?`, [playerId], (err, playerRow) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    if (!playerRow) {
+      return res.status(404).json({ error: "Player not found" });
+    }
+
+    db.all(
+      `SELECT team_id, discipline, season, location FROM player_team_history WHERE player_id = ? ORDER BY season DESC`,
+      [playerId],
+      (err2, historyRows) => {
+        if (err2) {
+          return res.status(500).json({ error: err2.message });
+        }
+
+        res.status(200).json({
+          playerId: playerRow.player_id,
+          name: playerRow.name,
+          age: playerRow.age,
+          born: playerRow.born,
+          resides: playerRow.resides,
+          throws: playerRow.throws,
+          profession: playerRow.profession,
+          highSchool: playerRow.high_school,
+          teamHistory: historyRows.map((h) => ({
+            teamId: h.team_id,
+            discipline: h.discipline,
+            season: h.season,
+            location: h.location,
+          })),
+        });
+      }
+    );
+  });
+});
+
 // --- GET /teams/card ---
 app.get("/teams/card", (req, res) => {
   const id = req.query.id;
